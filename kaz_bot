@@ -1,0 +1,254 @@
+import asyncio
+import random
+import sqlite3 as sl
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from aiogram.filters.command import Command
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+
+bot = Bot(token='7441558848:AAGYjCZTtYwGm4zzfZBGDNQ2x3RfhOOg6jI')
+
+class States(StatesGroup):
+    num_choose = State()
+    roulettes = State()
+    choose_bet = State()
+    team_choose = State()
+
+dp = Dispatcher()
+
+
+
+con = sl.connect('kaziks_database.db')
+cur = con.cursor()
+cur.execute(""" CREATE TABLE IF NOT EXISTS Pidors 
+    (money INTEGER DEFAULT 0,
+    tg_id INTEGER,
+    username TEXT NOT NULL,
+    wins INTEGER DEFAULT 0,
+    loses INTEGER DEFAULT 0,
+    bonus BOOL DEFAULT False )
+    """
+) 
+
+
+
+kb = [ [KeyboardButton(text='Профиль'), KeyboardButton(text='Играть')],
+      [KeyboardButton(text='Бонус'),KeyboardButton(text='Рулетки')]
+]
+keyb = ReplyKeyboardMarkup(
+    keyboard=kb,
+    resize_keyboard=True    
+)
+
+game_kb =[[KeyboardButton(text='Футбольные команды'), KeyboardButton(text='Числа')]]
+
+game_kb = ReplyKeyboardMarkup(
+    keyboard=game_kb,
+    resize_keyboard=True    
+)
+
+
+
+gol_kb = [[KeyboardButton(text='1'), KeyboardButton(text='2')],
+          [KeyboardButton(text='3'), KeyboardButton(text='4')]]
+
+goool_kb = ReplyKeyboardMarkup(
+    keyboard=gol_kb,
+    resize_keyboard=True    
+)
+
+nl = InlineKeyboardButton(text='Статистика',
+callback_data='stats'                      
+)
+
+inlkb = InlineKeyboardMarkup(  
+    inline_keyboard=[[nl]]                   
+)
+
+@dp.message(Command('start'))
+async def dan(message: Message):
+    user_name = message.from_user.username
+    user_id = message.from_user.id
+    cur.execute(f"SELECT * FROM Pidors WHERE tg_id='{user_id}'")
+    check = cur.fetchone()
+    if check:
+        await message.answer(f"Вы уже зарегестрированны", reply_markup=keyb)
+    else:
+        cur.execute('INSERT INTO Pidors (username, tg_id) VALUES (?, ?)', [user_name, user_id] )
+        con.commit()
+        await message.answer('Вы были внесены в базу данных',reply_markup=keyb)
+
+@dp.message(F.text.lower() == 'рулетки')
+async def inf_rullt(message: Message):
+    await message.answer(f'''В рулетке "Футбольные команды" вам предстоит выбрать одну из четырёх команд и сделать ставку, при победе вы удваиваете поставленные монеты, при проигрыше монеты будут списанны с вашего кошелька.
+                         
+В рулетке "Числа" вам предстоит угадать число от 1 до 10 и сделать ставку, при победе вы утраиваете поставленные монеты, при проигрыше монеты будут списанны с вашего кошелька.''', reply_markup=keyb)
+
+@dp.message(F.text.lower() == 'играть')
+async def choose_game(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    cur.execute(f"SELECT * FROM Pidors WHERE tg_id = '{user_id}'")
+    inf = cur.fetchone()
+    if inf:
+        await message.answer('Выберите рулетку', reply_markup=game_kb)
+        await state.set_state(States.roulettes)
+    else:
+        await message.answer('Вы не зарегестрированны', reply_markup=keyb)
+        await state.clear()
+
+
+@dp.message(States.roulettes, F.text.lower() == 'футбольные команды')
+async def roult(message: Message, state: FSMContext):
+    roulette=message.text.lower()
+    await state.update_data(roulettes=roulette)
+    await state.set_state(States.team_choose)
+    await message.answer('Выбирете команду на которую хотите сделать ставку', reply_markup=goool_kb)
+
+@dp.message(States.team_choose)
+async def team(message: Message, state: FSMContext):
+    await state.update_data(team=int(message.text))
+    await state.set_state(States.choose_bet)
+    data = await state.get_data()
+    if data['team'] >=1 and data['team']<= 4:
+        await message.answer(f'Выберите свою ставку')
+    else:
+        await state.clear()
+        await message.answer(f'Такой каманды нет', reply_markup=keyb)
+
+
+@dp.message(States.roulettes, F.text.lower() == 'числа')
+async def choose_num(message: Message, state: FSMContext):
+    roulette=message.text.lower()
+    await state.update_data(roulettes=roulette)
+    await state.set_state(States.num_choose)
+    await message.answer(f'Введите число от 1 до 10 на которое хотите сделать ставку' )
+    
+@dp.message(States.num_choose)
+async def num(message: Message, state: FSMContext):
+    await state.update_data(num=int(message.text))
+    await state.set_state(States.choose_bet)
+    data = await state.get_data()
+    
+    if data['num'] >=1 and data['num']<= 10:
+        await message.answer(f'Выберите свою ставку')
+    else:
+        await state.clear()
+        await message.answer(f'Введенное число не подходит', reply_markup=keyb)
+
+@dp.message(States.choose_bet)
+async def bet(message: Message, state: FSMContext):
+    await state.update_data(stavka=int(message.text))
+    user_id = message.from_user.id
+    data = await state.get_data()
+    await state.clear()
+    stavka = data['stavka']
+    print('ставка',stavka)
+    cur.execute(f"SELECT money FROM Pidors WHERE tg_id='{user_id}'")
+    money_check = cur.fetchone()
+    if money_check[0] >= stavka:
+        
+        cur.execute(f"UPDATE Pidors SET money = money -{stavka} WHERE tg_id = '{message.from_user.id}' ")
+        con.commit()
+        print(data['roulettes'])
+        if data['roulettes'] == 'футбольные команды':
+                namb = random.randint(1, 4)
+                print('рандом', namb)
+                print('команда', data['team'])
+                if data['team'] == namb:
+                    cur.execute(f"UPDATE Pidors SET money = money +{stavka * 2} WHERE tg_id = '{user_id}' ")
+                    con.commit()
+                    cur.execute(f"UPDATE Pidors SET wins = wins +1 WHERE tg_id = '{user_id}' ")
+                    con.commit()
+                    await message.answer("Вы победили", reply_markup=keyb)
+                else:
+                    cur.execute(f"UPDATE Pidors SET loses = loses +1 WHERE tg_id = '{user_id}' ")
+                    con.commit()
+                    await message.answer("Вы проиграли", reply_markup=keyb)
+
+        if data['roulettes'] == 'числа':
+                namb = random.randint(1, 10)
+                print('рандом', namb)
+                print('число', data['num'])
+                if data['num'] == namb:
+                    cur.execute(f"UPDATE Pidors SET money = money +{stavka * 3} WHERE tg_id = '{user_id}' ")
+                    con.commit()
+                    cur.execute(f"UPDATE Pidors SET wins = wins +1 WHERE tg_id = '{user_id}' ")
+                    con.commit()
+                    await message.answer("Вы победили", reply_markup=keyb)
+                else:
+                    cur.execute(f"UPDATE Pidors SET loses = loses +1 WHERE tg_id = '{user_id}' ")
+                    con.commit()
+                    await message.answer("Вы проиграли", reply_markup=keyb)   
+    else:
+        await message.answer(f'Недостаточно средств', reply_markup=keyb)
+
+
+
+@dp.message(F.text.lower() == 'бонус')
+async def kazix(message: Message):
+
+    user_id = message.from_user.id
+    cur.execute(f"SELECT * FROM Pidors WHERE tg_id = '{user_id}'")
+    inf = cur.fetchone()
+    if inf:
+        cur.execute(f"SELECT bonus FROM Pidors WHERE tg_id='{user_id}'")
+        bonus_check = cur.fetchone()
+
+        if bonus_check[0]==False:
+            cur.execute(f"UPDATE Pidors SET bonus = True WHERE tg_id = '{user_id}' ")
+            con.commit()
+            cur.execute(f"UPDATE Pidors SET money = money +50 WHERE tg_id = '{user_id}' ")
+            con.commit()
+            cur.execute(f"SELECT * FROM Pidors WHERE tg_id='{user_id}'")
+            check = cur.fetchone()
+            if check:
+                await message.answer("Вы получили бонус") 
+            else:
+                await message.answer('Вы не зарегестрированны')
+        else:
+            await message.answer('Вы уже получили бонус')
+    else:
+        await message.answer('Вы не зарегестрированны')
+
+@dp.message(F.text.lower() == 'профиль')
+async def kazix(message: Message):
+    user_id = message.from_user.id
+    cur.execute(f"SELECT * FROM Pidors WHERE tg_id = '{user_id}'")
+    inf = cur.fetchone()
+
+    if inf:
+        await message.answer(f'''Имя: {inf[2]},
+Ваш id: {inf[1]},
+Кошелёк: {inf[0]},
+Выйгрыши: {inf[3]},
+Проигрыши: {inf[4]}
+''', reply_markup = inlkb)
+        
+    else:
+        await message.answer('Вы не зарегестрированны')
+
+@dp.callback_query(F.data == 'stats')
+async def stata(callback:CallbackQuery):
+    user_id = callback.from_user.id
+    cur.execute(f"SELECT * FROM Pidors WHERE tg_id = '{user_id}'")
+    stat = cur.fetchone()
+    if stat[4] > 0:
+        await callback.message.edit_text(f'''
+        Кошелёк: {stat[0]},
+Побед/Проигрышей: {stat[3] / stat[4]}
+        ''')
+    else:
+        await callback.message.edit_text(f'''
+Кошелёк: {stat[0]},
+Побед: {stat[3]}
+        ''')
+
+async def main():
+    await dp.start_polling(bot)
+
+if __name__=="__main__":
+    asyncio.run(main())
+
+con.commit()
+con.close()
