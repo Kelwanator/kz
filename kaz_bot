@@ -7,7 +7,7 @@ from aiogram.filters.command import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-bot = Bot(token='7441558848:AAGYjCZTtYwGm4zzfZBGDNQ2x3RfhOOg6jI')
+bot = Bot(token=' ')
 
 class States(StatesGroup):
     num_choose = State()
